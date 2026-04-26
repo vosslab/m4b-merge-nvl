@@ -1,5 +1,11 @@
 m4b-tool/ 
 tests/media_files
+Derek_Cheung-Conquering_the_Electron/
+*.mp3
+*.aac
 
 report_*.txt
 .DS_Store
+src/*.egg-info/
+build/
+dist/

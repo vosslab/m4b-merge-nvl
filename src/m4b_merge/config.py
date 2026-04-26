@@ -13,17 +13,8 @@ else:
         exist_ok=True
     )
 
-# Find path to m4b-tool binary
-# Check that binary actually exists
+# Discover external binaries lazily; consumers check at use-time.
+# Patch 5 replaces this module with runtime_config.discover() that fails
+# fast when binaries are missing.
 m4b_tool_bin = shutil.which('m4b-tool')
-if not m4b_tool_bin:
-    raise SystemExit(
-        'Error: Cannot find m4b-tool binary.'
-        )
-
-# Test existence of mp4chaps
 mp4chaps_bin = shutil.which('mp4chaps')
-if not mp4chaps_bin:
-    raise SystemExit(
-        'Error: Cannot find mp4chaps binary.'
-        )

@@ -1,0 +1,10 @@
+mutagen==1.47.0
+platformdirs==4.3.6
+requests==2.32.3
+
+# Transitional deps used only by code being replaced in later patches.
+# Remove appdirs in Patch 5 (runtime_config rewrite drops it).
+# Remove pydub and pathvalidate in Patch 7 (m4b_helper.py removal).
+appdirs==1.4.4
+pathvalidate==3.2.0
+pydub==0.25.1
