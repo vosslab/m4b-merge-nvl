@@ -9,3 +9,4 @@ report_*.txt
 src/*.egg-info/
 build/
 dist/
+.claude/
