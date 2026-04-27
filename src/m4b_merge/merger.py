@@ -6,6 +6,7 @@ cover discovery, source preflight, encoding, concatenation, chapter building,
 remuxing, tagging, and cleanup.
 """
 
+import time
 import pathlib
 import shutil
 import logging
@@ -118,6 +119,8 @@ class Merger:
 			SourcePreflightError: if sources are heterogeneous.
 			subprocess.CalledProcessError: if ffmpeg operations fail.
 		"""
+		run_start = time.monotonic()
+
 		# Step 1: Classify input
 		input_dir = self.input_path
 		if not input_dir.is_dir():
@@ -132,27 +135,43 @@ class Merger:
 		if not source_files:
 			raise ValueError(f"No MP3 files found in {input_dir}")
 
+		print(f"[1/8] Scanning input: found {len(source_files)} MP3 file(s) in {input_dir.name}")
+
 		# Step 2: Resolve metadata
+		print("[2/8] Resolving metadata (Audnex/sidecar/filenames)...")
 		metadata = self._resolve_metadata(input_dir)
 		if not metadata.get("title"):
 			raise ValueError(
 				"No title found in metadata. "
 				"Provide via sidecar.txt or Audnex ASIN."
 			)
+		print(f"      Title: {metadata['title']}")
+		if metadata.get("authors"):
+			print(f"      Authors: {', '.join(metadata['authors'])}")
+		if metadata.get("narrators"):
+			print(f"      Narrators: {', '.join(metadata['narrators'])}")
 
 		# Step 3: Resolve cover
+		print("[3/8] Locating cover image...")
 		cover_hit = None
 		cover_path = None
 		cover_hit = cover_finder.find(input_dir)
 
 		if cover_hit:
 			cover_path = cover_hit.path
+			print(f"      Cover: {cover_path.name}")
 		elif metadata.get("cover_url"):
 			# TODO: Download cover from metadata["cover_url"] in future
 			logging.warning("Cover URL present but downloading not yet implemented")
+			print("      Cover: (none found, placeholder will be used)")
+		else:
+			print("      Cover: (none found, placeholder will be used)")
 
 		# Step 4: Source homogeneity preflight
+		print("[4/8] Probing source files and verifying homogeneity...")
 		probe_results_src = self._probe_and_validate_sources(source_files)
+		total_dur = sum(p["duration_seconds"] for p in probe_results_src)
+		print(f"      Total source duration: {total_dur:.1f}s ({total_dur/3600:.2f}h)")
 
 		# Cache sidecar result to avoid re-parsing (HIGH-06)
 		sidecar = self._get_sidecar(input_dir)
@@ -196,16 +215,27 @@ class Merger:
 		self.runtime_config.tmp_dir.mkdir(parents=True, exist_ok=True)
 
 		# Step 6: Encode each MP3 to M4A
+		print(f"[5/8] Encoding {len(source_files)} file(s) to AAC ({self.runtime_config.aac_encoder} {' '.join(self.runtime_config.quality_args)})...")
 		encoded_dir = self.runtime_config.tmp_dir / "encoded"
 		encoded_dir.mkdir(parents=True, exist_ok=True)
 
 		encoded_files = []
+		encode_start = time.monotonic()
 		for idx, src_file in enumerate(source_files):
+			step_start = time.monotonic()
 			dst_file = encoded_dir / f"{idx:03d}.m4a"
+			src_dur = probe_results_src[idx]["duration_seconds"]
+			print(f"      [{idx+1:>2}/{len(source_files)}] {src_file.name} ({src_dur:.1f}s)", end="", flush=True)
 			ffmpeg_runner.encode_to_m4a(src_file, dst_file, self.runtime_config)
 			encoded_files.append(dst_file)
+			elapsed = time.monotonic() - step_start
+			print(f" -> {elapsed:.1f}s ({src_dur/elapsed:.0f}x realtime)")
+		encode_total = time.monotonic() - encode_start
+		print(f"      Encoded in {encode_total:.1f}s total ({total_dur/encode_total:.0f}x realtime)")
 
 		# Step 7: Concatenate with preflight
+		print("[6/8] Concatenating encoded files...")
+		concat_start = time.monotonic()
 		merged_file = self.runtime_config.tmp_dir / "merged.tmp.m4a"
 		ffmpeg_runner.concat(
 			encoded_files,
@@ -213,8 +243,10 @@ class Merger:
 			self.runtime_config,
 			preflight=True,
 		)
+		print(f"      Concatenated in {time.monotonic() - concat_start:.1f}s")
 
 		# Step 8: Build chapters
+		print("[7/8] Building chapters and remuxing with cover + metadata...")
 		probe_results = [
 			ffmpeg_runner.probe(f, self.runtime_config) for f in encoded_files
 		]
@@ -257,13 +289,18 @@ class Merger:
 			)
 
 		# Step 10: Tagger pass
+		print("[8/8] Writing MP4 tags...")
 		tagger.write(final_m4b, metadata, cover_path)
 
 		# Step 11: Cleanup
 		if not self.runtime_config.keep_temp:
 			shutil.rmtree(self.runtime_config.tmp_dir, ignore_errors=True)
 
-		logging.info(f"Merge complete: {final_m4b}")
+		size_mb = final_m4b.stat().st_size / (1024 * 1024)
+		total_elapsed = time.monotonic() - run_start
+		print()
+		print(f"Done: {final_m4b}")
+		print(f"      {size_mb:.1f} MB, {total_dur/3600:.2f}h audio, encoded in {total_elapsed:.1f}s ({total_dur/total_elapsed:.0f}x realtime)")
 
 	def _get_sidecar(self, input_dir: pathlib.Path) -> dict:
 		"""
