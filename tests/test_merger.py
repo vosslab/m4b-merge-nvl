@@ -51,40 +51,32 @@ def three_mp3_fixture(tmp_path):
 @pytest.fixture
 def test_runtime_config(tmp_path):
 	"""Build a minimal RuntimeConfig for testing."""
-	# Use system ffmpeg/mediainfo/sox or skip test
-	try:
-		# RuntimeConfig is frozen, so we need to create one with the right tmp_dir
-		tmp_merge_dir = tmp_path / "m4b_merge_tmp"
-		tmp_merge_dir.mkdir(parents=True, exist_ok=True)
+	import shutil
+	from m4b_merge.runtime_config import RuntimeConfig, _detect_aac_encoder
 
-		# Discover binary paths
-		import shutil
-		from m4b_merge.runtime_config import RuntimeConfig, _detect_aac_encoder
-
-		ffmpeg_path = shutil.which("ffmpeg")
-		mediainfo_path = shutil.which("mediainfo")
-		sox_path = shutil.which("sox")
-
-		if not ffmpeg_path or not mediainfo_path or not sox_path:
-			pytest.skip("ffmpeg, mediainfo, or sox not found")
-
-		# Build config manually with test tmp_dir
-		aac_encoder, quality_args = _detect_aac_encoder(ffmpeg_path)
-
-		config = RuntimeConfig(
-			ffmpeg_path=ffmpeg_path,
-			mediainfo_path=mediainfo_path,
-			sox_path=sox_path,
-			aac_encoder=aac_encoder,
-			quality_args=quality_args,
-			audnex_url="https://api.audnex.us",
-			keep_temp=False,
-			dry_run=False,
-			tmp_dir=tmp_merge_dir,
-		)
-		return config
-	except Exception:
+	# Skip cleanly when required binaries are absent. Do not swallow other
+	# exceptions: those indicate real bugs in the test setup.
+	ffmpeg_path = shutil.which("ffmpeg")
+	mediainfo_path = shutil.which("mediainfo")
+	sox_path = shutil.which("sox")
+	if not (ffmpeg_path and mediainfo_path and sox_path):
 		pytest.skip("ffmpeg, mediainfo, or sox not found")
+
+	tmp_merge_dir = tmp_path / "m4b_merge_tmp"
+	tmp_merge_dir.mkdir(parents=True, exist_ok=True)
+
+	aac_encoder, quality_args = _detect_aac_encoder(ffmpeg_path)
+	return RuntimeConfig(
+		ffmpeg_path=ffmpeg_path,
+		mediainfo_path=mediainfo_path,
+		sox_path=sox_path,
+		aac_encoder=aac_encoder,
+		quality_args=quality_args,
+		audnex_url="https://api.audnex.us",
+		keep_temp=False,
+		dry_run=False,
+		tmp_dir=tmp_merge_dir,
+	)
 
 
 def test_merger_with_sidecar(three_mp3_fixture, tmp_path, test_runtime_config):

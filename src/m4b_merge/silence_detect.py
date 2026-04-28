@@ -30,10 +30,8 @@ def compute_file_hash_and_mtime(path: str) -> tuple[str, float]:
 	stat = os.stat(path)
 	return sha1.hexdigest(), stat.st_mtime
 
-def load_cache(path: str) -> list[tuple[float, float]] | None:
+def load_cache(path: str, file_sha1: str, file_mtime: float) -> list[tuple[float, float]] | None:
 	"""Load cached silence intervals if valid."""
-	file_sha1, file_mtime = compute_file_hash_and_mtime(path)
-
 	cache_dir = get_cache_dir()
 	cache_file = cache_dir / f"{file_sha1}.json"
 
@@ -59,10 +57,8 @@ def load_cache(path: str) -> list[tuple[float, float]] | None:
 		logging.warning(f"Error reading cache for {path}: {e}")
 		return None
 
-def save_cache(path: str, intervals: list[tuple[float, float]]) -> None:
+def save_cache(file_sha1: str, file_mtime: float, intervals: list[tuple[float, float]]) -> None:
 	"""Save silence intervals to cache."""
-	file_sha1, file_mtime = compute_file_hash_and_mtime(path)
-
 	cache_dir = get_cache_dir()
 	cache_file = cache_dir / f"{file_sha1}.json"
 
@@ -82,15 +78,8 @@ def save_cache(path: str, intervals: list[tuple[float, float]]) -> None:
 		json.dump(data, tmp)
 		tmp_path = tmp.name
 
-	try:
-		os.replace(tmp_path, cache_file)
-	except (OSError,):
-		# If atomic rename fails, clean up temp file
-		try:
-			os.unlink(tmp_path)
-		except OSError as unlink_err:
-			logging.warning(f"Failed to clean up temp cache file {tmp_path}: {unlink_err}")
-		raise
+	# Atomic rename. If this fails, the .tmp file may leak (acceptable).
+	os.replace(tmp_path, cache_file)
 
 def detect(path: str, runtime_config, chunk_size: float = 1.0, amplitude_threshold: float = 0.001) -> list[tuple[float, float]]:
 	"""
@@ -106,8 +95,11 @@ def detect(path: str, runtime_config, chunk_size: float = 1.0, amplitude_thresho
 		Sorted list of (start_seconds, end_seconds) tuples for silence intervals.
 		Raises subprocess.CalledProcessError if sox fails.
 	"""
+	# Compute file fingerprint once and reuse for both load and save
+	file_sha1, file_mtime = compute_file_hash_and_mtime(path)
+
 	# Check cache first
-	cached = load_cache(path)
+	cached = load_cache(path, file_sha1, file_mtime)
 	if cached is not None:
 		return cached
 
@@ -119,16 +111,12 @@ def detect(path: str, runtime_config, chunk_size: float = 1.0, amplitude_thresho
 		text=True
 	)
 
-	# Parse duration from "Length (seconds):" line
+	# Parse duration from "Length (seconds):     60.000000" line.
 	total_duration = None
 	for line in stat_result.stderr.split("\n"):
-		if "Length" in line and "seconds" in line:
-			try:
-				# Extract value after the colon: "Length (seconds):     60.000000"
-				total_duration = float(line.split(":")[-1].strip())
-				break
-			except (ValueError, IndexError):
-				pass
+		if "Length" in line and "seconds" in line and ":" in line:
+			total_duration = float(line.split(":", 1)[1].strip())
+			break
 
 	if total_duration is None:
 		raise ValueError(f"Could not determine duration of {path}")
@@ -150,22 +138,24 @@ def detect(path: str, runtime_config, chunk_size: float = 1.0, amplitude_thresho
 			text=True
 		)
 
-		# Parse max amplitude from "Maximum amplitude:" line
+		# Parse max amplitude from "Maximum amplitude:    0.012345" line.
+		# sox stat output is "<label>:    <value>" so split on the first colon.
 		max_amplitude = None
 		for line in stat_result.stderr.split("\n"):
-			if "Maximum amplitude" in line:
-				parts = line.split()
-				for i, part in enumerate(parts):
-					if part.startswith("Maximum"):
-						# Next token should be the value
-						if i + 2 < len(parts):
-							try:
-								max_amplitude = float(parts[i + 2])
-								break
-							except ValueError:
-								pass
+			if "Maximum amplitude" in line and ":" in line:
+				value_str = line.split(":", 1)[1].strip()
+				max_amplitude = float(value_str)
+				break
 
-		is_silent = max_amplitude is not None and max_amplitude < amplitude_threshold
+		# Fail loud if the amplitude line is missing or unparseable; a silent
+		# fallback would produce wrong chapter splits.
+		if max_amplitude is None:
+			raise ValueError(
+				f"Could not parse 'Maximum amplitude' from sox stat for {path} "
+				f"at pos={pos:.2f}s"
+			)
+
+		is_silent = max_amplitude < amplitude_threshold
 
 		if is_silent:
 			if current_silence_start is None:
@@ -182,6 +172,6 @@ def detect(path: str, runtime_config, chunk_size: float = 1.0, amplitude_thresho
 		silences.append((current_silence_start, total_duration))
 
 	# Cache the result
-	save_cache(path, silences)
+	save_cache(file_sha1, file_mtime, silences)
 
 	return silences

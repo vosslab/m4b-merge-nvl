@@ -34,38 +34,29 @@ def write(m4b_path: pathlib.Path, metadata: dict, cover_path: pathlib.Path | Non
 	# Load the M4B
 	mp4_file = mutagen.mp4.MP4(str(m4b_path))
 
-	# Title: \xa9nam (©nam)
-	if metadata.get("title"):
-		_set_atom(mp4_file, "\xa9nam", metadata["title"])
-
-	# Artist: \xa9ART - join authors list
-	if metadata.get("authors") and isinstance(metadata["authors"], list):
-		authors_str = ", ".join(metadata["authors"])
-		if authors_str:
-			_set_atom(mp4_file, "\xa9ART", authors_str)
+	# Title: \xa9nam. Required key; direct access exposes missing data.
+	title = metadata["title"]
+	_set_atom(mp4_file, "\xa9nam", title)
 
 	# Album: \xa9alb - set to title for audiobooks
-	if metadata.get("title"):
-		_set_atom(mp4_file, "\xa9alb", metadata["title"])
+	_set_atom(mp4_file, "\xa9alb", title)
 
-	# Release date: \xa9day
-	if metadata.get("release_date"):
+	# Artist: \xa9ART - join authors list (may be None for filename-only metadata)
+	authors = metadata["authors"]
+	if authors:
+		_set_atom(mp4_file, "\xa9ART", ", ".join(authors))
+
+	# Release date: \xa9day (optional)
+	if metadata["release_date"]:
 		_set_atom(mp4_file, "\xa9day", metadata["release_date"])
 
-	# Genre: \xa9gen - first genre if present
-	if metadata.get("genres") and isinstance(metadata["genres"], list):
-		genres = [g for g in metadata["genres"] if g]
-		if genres:
-			_set_atom(mp4_file, "\xa9gen", genres[0])
+	# Composer (narrator): \xa9wrt - join narrators list (optional)
+	narrators = metadata["narrators"]
+	if narrators:
+		_set_atom(mp4_file, "\xa9wrt", ", ".join(narrators))
 
-	# Composer (narrator): \xa9wrt - join narrators list
-	if metadata.get("narrators") and isinstance(metadata["narrators"], list):
-		narrators_str = ", ".join(metadata["narrators"])
-		if narrators_str:
-			_set_atom(mp4_file, "\xa9wrt", narrators_str)
-
-	# Description: desc
-	if metadata.get("description"):
+	# Description: desc (optional)
+	if metadata["description"]:
 		_set_atom(mp4_file, "desc", metadata["description"])
 
 	# Cover art: covr - embed if cover_path provided and not already present

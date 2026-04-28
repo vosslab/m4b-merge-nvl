@@ -13,6 +13,11 @@ import m4b_merge.helpers as helpers
 import m4b_merge.merger as merger
 
 
+# Audnex API base URL. Edit here, not via a CLI flag, since it almost never
+# changes between runs.
+AUDNEX_URL = "https://api.audnex.us"
+
+
 def parse_args():
 	"""Parse command-line arguments."""
 	parser = argparse.ArgumentParser(
@@ -42,33 +47,44 @@ def parse_args():
 		help="Skip Audnex metadata lookup; use sidecar and cover only"
 	)
 
-	parser.add_argument(
-		"-u", "--api-url",
-		dest="api_url",
-		default="https://api.audnex.us",
-		help="Audnex API base URL (default: %(default)s)"
-	)
-
-	parser.add_argument(
+	dry_run_group = parser.add_mutually_exclusive_group()
+	dry_run_group.add_argument(
 		"-d", "--dry-run",
-		dest="dry_run",
-		action="store_true",
+		dest="dry_run", action="store_true",
 		help="Plan execution without writing files"
 	)
+	dry_run_group.add_argument(
+		"--no-dry-run",
+		dest="dry_run", action="store_false",
+		help="Disable dry-run (default)"
+	)
+	parser.set_defaults(dry_run=False)
 
-	parser.add_argument(
+	keep_temp_group = parser.add_mutually_exclusive_group()
+	keep_temp_group.add_argument(
 		"-k", "--keep-temp",
-		dest="keep_temp",
-		action="store_true",
+		dest="keep_temp", action="store_true",
 		help="Preserve temporary directory after merge completes"
 	)
+	keep_temp_group.add_argument(
+		"--no-keep-temp",
+		dest="keep_temp", action="store_false",
+		help="Remove temporary directory after merge completes (default)"
+	)
+	parser.set_defaults(keep_temp=False)
 
-	parser.add_argument(
+	force_group = parser.add_mutually_exclusive_group()
+	force_group.add_argument(
 		"-f", "--force",
-		dest="force",
-		action="store_true",
+		dest="force", action="store_true",
 		help="Overwrite existing output file if it exists"
 	)
+	force_group.add_argument(
+		"--no-force",
+		dest="force", action="store_false",
+		help="Refuse to overwrite existing output (default)"
+	)
+	parser.set_defaults(force=False)
 
 	return parser.parse_args()
 
@@ -97,33 +113,42 @@ def _validate_output_path(output_path: Path) -> None:
 
 def _prompt_for_asin(api_url: str) -> str | None:
 	"""
-	Prompt user for audiobook ASIN and validate it.
+	Prompt user for an audiobook ASIN and validate it.
+
+	The user may press Enter to skip Audnex lookup entirely. Otherwise the
+	last validation error is raised so the user sees why their ASIN was
+	rejected instead of the program silently continuing without metadata.
 
 	Args:
 		api_url: Audnex API base URL for validation.
 
 	Returns:
-		Validated ASIN, or None if user skips.
+		Validated ASIN, or None if the user pressed Enter to skip.
+
+	Raises:
+		ValueError: if the user supplied an invalid ASIN three times.
 	"""
 	max_attempts = 3
+	last_error = None
 	for attempt in range(max_attempts):
 		user_input = input("Audiobook ASIN (or press Enter to skip): ").strip()
 
 		if not user_input:
 			return None
 
+		# validate_asin raises ValueError on bad ASIN or HTTP error
+		last_error = None
 		try:
 			helpers.validate_asin(api_url, user_input)
 			return user_input
 		except ValueError as e:
+			last_error = e
 			remaining = max_attempts - attempt - 1
 			if remaining > 0:
 				print(f"Invalid ASIN: {e}. Try again ({remaining} attempts left).")
-			else:
-				print(f"Invalid ASIN: {e}. Skipping Audnex lookup.")
-				return None
 
-	return None
+	# All attempts exhausted with invalid input. Surface the last error.
+	raise ValueError(f"Invalid ASIN after {max_attempts} attempts: {last_error}")
 
 
 def main():
@@ -135,7 +160,7 @@ def main():
 
 	# Build RuntimeConfig
 	config = runtime_config.discover(
-		audnex_url=args.api_url,
+		audnex_url=AUDNEX_URL,
 		keep_temp=args.keep_temp,
 		dry_run=args.dry_run,
 	)
@@ -143,7 +168,7 @@ def main():
 	# Prompt for ASIN if not --no-asin
 	asin = None
 	if not args.no_asin:
-		asin = _prompt_for_asin(args.api_url)
+		asin = _prompt_for_asin(AUDNEX_URL)
 
 	# Create and run Merger
 	m = merger.Merger(

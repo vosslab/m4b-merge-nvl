@@ -1,7 +1,14 @@
-from pathlib import Path
-import collections
-import logging
+"""
+Filesystem and ASIN-validation helpers shared across the pipeline.
+"""
+
 import os
+import time
+import random
+import logging
+import collections
+from pathlib import Path
+
 import requests
 
 
@@ -16,7 +23,7 @@ def find_extension(path_to_check):
 				):
 			extension_to_use = EXT
 			return extension_to_use
-	logging.warn(f'Could not determine extension for {path_to_check}, continuing with a guess')
+	logging.warning(f'Could not determine extension for {path_to_check}, continuing with a guess')
 	first_file = os.listdir(Path(path_to_check))[0]
 	extension_to_use = Path(first_file).suffix.replace('.', '')
 
@@ -86,8 +93,8 @@ def get_directory(input_take):
 	# Check if input is a file
 	elif Path(input_take).is_file():
 		path_to_use = input_take
-		extension_to_use_PRE = path_to_use.suffix
-		extension_to_use = Path(extension_to_use_PRE).stem.split('.')[1]
+		# .suffix already returns ".m4b"; strip the leading dot.
+		extension_to_use = Path(path_to_use).suffix.lstrip('.')
 		num_of_files = 1
 
 	# Handle not a file or dir
@@ -104,6 +111,8 @@ def get_directory(input_take):
 # Checks that asin is the expected length, then cheks for http code 200
 def validate_asin(api_url, asin):
 	if len(asin) == 10:
+		# Polite jitter before remote validation
+		time.sleep(random.random())
 		# Check ASIN http response
 		check = requests.get(f"{api_url}/books/{asin}")
 		# If either good http response or valid api response

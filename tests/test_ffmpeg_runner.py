@@ -21,13 +21,14 @@ def runtime_config_fixture(tmp_path):
 	"""
 	ffmpeg_path = shutil.which("ffmpeg")
 	mediainfo_path = shutil.which("mediainfo")
-	if not ffmpeg_path or not mediainfo_path:
-		pytest.skip("ffmpeg or mediainfo not installed")
+	sox_path = shutil.which("sox")
+	if not ffmpeg_path or not mediainfo_path or not sox_path:
+		pytest.skip("ffmpeg, mediainfo, or sox not installed")
 
 	return RuntimeConfig(
 		ffmpeg_path=ffmpeg_path,
 		mediainfo_path=mediainfo_path,
-		sox_path="/usr/bin/sox",
+		sox_path=sox_path,
 		aac_encoder="aac",
 		quality_args=["-b:a", "160k"],
 		audnex_url="https://example.com",

@@ -5,6 +5,76 @@ Newer entries follow the `## YYYY-MM-DD` format from
 [docs/REPO_STYLE.md](REPO_STYLE.md). Older entries below were generated
 by `standard-version` against the upstream `djdembeck/m4b-merge` repo.
 
+## 2026-04-27
+
+### Behavior or Interface Changes
+
+- `__main__.py`: removed `-u/--api-url` flag (argparse minimalism). Audnex
+  base URL is now a module-level `AUDNEX_URL` constant. Boolean flags
+  `--dry-run`, `--keep-temp`, `--force` now have paired `--no-*` variants
+  with `set_defaults`.
+- `_prompt_for_asin` no longer silently returns `None` after three invalid
+  ASINs; it now raises `ValueError` so failures are visible. Pressing
+  Enter to skip is still respected.
+- `runtime_config._detect_aac_encoder`: removed `try/except` that silently
+  demoted `libfdk_aac` to native AAC on any failure. ffmpeg is verified
+  earlier in `discover()`, so a real failure here now raises.
+- `merger.run`: silence-detection failures now propagate instead of being
+  swallowed and replaced with `[]` (silent wrong-chapter splits).
+- `merger._resolve_output_path`: gained `check_collision` parameter; the
+  dry-run report now skips the `FileExistsError` collision check so
+  `--dry-run` works on re-runs without `--force`.
+- `tagger.write`: dropped dead `genres` branch (key never produced by any
+  metadata source). Required keys (`title`, `authors`, `narrators`,
+  `description`) now use direct dict access instead of `.get(key)`.
+- `silence_detect`: amplitude and duration parsers now raise on parse
+  failure instead of leaving `max_amplitude=None` and reporting "no
+  silence." Cache hash is computed once per call and threaded through
+  `load_cache` / `save_cache` (avoids a second full-file SHA1 read on hit).
+
+### Fixes and Maintenance
+
+- `ffmpeg_runner.probe`: `audio_track["Format"]` (direct access). The old
+  `.get("Format", "unknown")` let two un-probeable files compare equal in
+  the homogeneity preflight and bypass the guard.
+- `audible_helper.fetch_api_data` and `helpers.validate_asin`: added
+  `time.sleep(random.random())` before each Audnex `requests.get`, per
+  repo style.
+- `helpers.find_extension`: `logging.warn` (deprecated) -> `logging.warning`.
+- `helpers.get_directory`: replaced fragile `Path(...).stem.split('.')[1]`
+  (would `IndexError` for a bare suffix) with `Path(...).suffix.lstrip('.')`.
+  Renamed `extension_to_use_PRE` to follow snake_case. Added module
+  docstring.
+- `silence_detect.save_cache`: collapsed the nested temp-file cleanup
+  `try/except` into a plain `os.replace`; a failed atomic rename leaves a
+  `.tmp` file (acceptable, surfaces the real error).
+
+### Removals and Deprecations
+
+- Removed `tests/test_tagger.py::test_tagger_with_genres` (asserted on the
+  now-deleted `genres` tagger branch).
+
+### Developer Tests and Notes
+
+- `tests/test_merger.py::test_runtime_config`: replaced bare
+  `except Exception: pytest.skip(...)` with a `shutil.which` precheck and
+  let unrelated exceptions propagate.
+- `tests/test_chapter_builder.py::test_derek_fixture_no_split`: replaced
+  brittle `assert len(chapters) == 21` with the invariant
+  `len(chapters) == len(filenames)`.
+- `tests/test_sidecar_parser.py`: replaced fixture-dependent test (relied
+  on the untracked `Derek_Cheung-Conquering_the_Electron/` directory and
+  asserted on hardcoded publisher / description / language fields) with
+  an inline-fixture round-trip test of the parser on Derek-style sidecar
+  text. `test_missing_file` now uses `pytest.raises`.
+- `tests/test_silence_detect.py::rt_config`: replaced
+  `shutil.which("sox") or "sox"` (and friends) with a precheck that
+  skips when binaries are missing.
+- `tests/test_ffmpeg_runner.py::runtime_config_fixture`: replaced
+  hardcoded `/usr/bin/sox` with `shutil.which("sox")`; skips when sox is
+  absent (Apple Silicon Homebrew installs to `/opt/homebrew/bin`).
+- Full suite: 281 passed.
+
 ## 2026-04-25
 
 ### Additions and New Features

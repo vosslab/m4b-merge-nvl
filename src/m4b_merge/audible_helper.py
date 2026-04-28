@@ -5,6 +5,8 @@ Fetches metadata and chapter data from the Audnex API and normalizes
 the response into the internal metadata dict format.
 """
 
+import time
+import random
 import logging
 import requests
 from datetime import timedelta
@@ -100,11 +102,14 @@ class BookData:
 		Raises:
 			requests.RequestException: if API calls fail.
 		"""
+		# Polite jitter so back-to-back calls do not hammer the Audnex API
+		time.sleep(random.random())
 		book_api_call = requests.get(
 			f"{api_url}/books/{self.asin}"
 		)
 		book_api_call.raise_for_status()
 
+		time.sleep(random.random())
 		chapter_api_call = requests.get(
 			f"{api_url}/books/{self.asin}/chapters"
 		)

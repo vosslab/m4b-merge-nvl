@@ -73,9 +73,9 @@ def probe(path: pathlib.Path, runtime_config) -> dict:
 	if not audio_track:
 		raise RuntimeError(f"No audio track found in {path}")
 
-	# Extract codec from Audio track Format field (lowercased)
-	codec_format = audio_track.get("Format", "unknown")
-	codec = codec_format.lower()
+	# Extract codec from Audio track Format field (lowercased).
+	# Direct access: a missing Format field is a real error, not "unknown".
+	codec = audio_track["Format"].lower()
 
 	# Extract sample rate
 	sample_rate = int(audio_track["SamplingRate"])

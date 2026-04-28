@@ -376,11 +376,10 @@ class TestSilenceDrivenSplitting:
 
 		chapters = extract_chapters_from_text(text)
 
-		# Should still be 21 chapters (no splitting)
-		assert len(chapters) == 21, \
-			f"Derek fixture should have 21 chapters, got {len(chapters)}"
+		# Invariant: when no file exceeds MAX, chapters == files (one per file).
+		assert len(chapters) == len(filenames)
 
-		# Verify no "- Part" suffixes
+		# Verify no "- Part" suffixes (no splitting happened)
 		for ch in chapters:
 			assert " - Part " not in ch["title"], \
 				f"Should not have part suffixes: {ch['title']}"

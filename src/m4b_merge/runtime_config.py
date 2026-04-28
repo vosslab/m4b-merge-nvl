@@ -8,7 +8,6 @@ locates external binaries and selects the best AAC encoder.
 import shutil
 import subprocess
 import tempfile
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 import os
@@ -101,21 +100,19 @@ def _detect_aac_encoder(ffmpeg_path: str) -> tuple[str, list[str]]:
 	Returns:
 		Tuple of (encoder_name, quality_args_list).
 	"""
-	try:
-		result = subprocess.run(
-			[ffmpeg_path, "-hide_banner", "-encoders"],
-			capture_output=True,
-			text=True,
-			timeout=10,
-		)
-		encoders_output = result.stdout
+	# Run with check=True so any failure raises rather than silently
+	# demoting the encoder. ffmpeg is verified earlier in discover().
+	result = subprocess.run(
+		[ffmpeg_path, "-hide_banner", "-encoders"],
+		capture_output=True,
+		text=True,
+		timeout=10,
+		check=True,
+	)
 
-		# Check for libfdk_aac in encoder list
-		if "libfdk_aac" in encoders_output:
-			return "libfdk_aac", ["-vbr", "5"]
-	except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError) as e:
-		# If detection fails, log warning and fall back to native AAC
-		logging.warning(f"AAC encoder detection failed: {e}. Falling back to native AAC.")
+	# Prefer libfdk_aac (higher quality at lower bitrates) when present
+	if "libfdk_aac" in result.stdout:
+		return "libfdk_aac", ["-vbr", "5"]
 
-	# Default to native aac
+	# Fall back to native aac
 	return "aac", ["-b:a", "160k"]

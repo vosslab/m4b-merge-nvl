@@ -140,7 +140,7 @@ class Merger:
 		# Step 2: Resolve metadata
 		print("[2/8] Resolving metadata (Audnex/sidecar/filenames)...")
 		metadata = self._resolve_metadata(input_dir)
-		if not metadata.get("title"):
+		if not metadata["title"]:
 			raise ValueError(
 				"No title found in metadata. "
 				"Provide via sidecar.txt or Audnex ASIN."
@@ -194,14 +194,9 @@ class Merger:
 				silences_per_file = [None] * len(source_files)
 				for idx in files_needing_silence_detection:
 					src_file = source_files[idx]
-					try:
-						silences = silence_detect.detect(str(src_file), self.runtime_config)
-						silences_per_file[idx] = silences
-					except (subprocess.CalledProcessError, ValueError, OSError) as e:
-						logging.warning(
-							f"Silence detection failed for {src_file.name}: {e}"
-						)
-						silences_per_file[idx] = []
+					silences_per_file[idx] = silence_detect.detect(
+						str(src_file), self.runtime_config
+					)
 
 		# Step 5: Dry-run branch
 		if self.runtime_config.dry_run:
@@ -475,7 +470,7 @@ class Merger:
 
 		return probes
 
-	def _resolve_output_path(self, title: str) -> pathlib.Path:
+	def _resolve_output_path(self, title: str, check_collision: bool = True) -> pathlib.Path:
 		"""
 		Resolve final output path from title and output_path.
 
@@ -503,7 +498,7 @@ class Merger:
 			)
 
 		# Check for output file collision (MED-10)
-		if resolved.exists() and not self.force:
+		if check_collision and resolved.exists() and not self.force:
 			raise FileExistsError(
 				f"Output file already exists: {resolved}. Use --force to overwrite."
 			)
@@ -529,7 +524,7 @@ class Merger:
 			files_needing_silence_detection: Optional list of file indices that
 				would have silence detection run.
 		"""
-		output_path = self._resolve_output_path(metadata["title"])
+		output_path = self._resolve_output_path(metadata["title"], check_collision=False)
 
 		print("=" * 70)
 		print("M4B-MERGE DRY-RUN REPORT")

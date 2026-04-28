@@ -20,11 +20,16 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def rt_config():
-	"""Minimal RuntimeConfig wired to the local sox/ffmpeg."""
+	"""Minimal RuntimeConfig wired to the local sox/ffmpeg/mediainfo."""
+	ffmpeg_path = shutil.which("ffmpeg")
+	sox_path = shutil.which("sox")
+	mediainfo_path = shutil.which("mediainfo")
+	if not (ffmpeg_path and sox_path and mediainfo_path):
+		pytest.skip("ffmpeg, sox, or mediainfo not found")
 	return runtime_config.RuntimeConfig(
-		ffmpeg_path=shutil.which("ffmpeg") or "ffmpeg",
-		sox_path=shutil.which("sox") or "sox",
-		mediainfo_path=shutil.which("mediainfo") or "mediainfo",
+		ffmpeg_path=ffmpeg_path,
+		sox_path=sox_path,
+		mediainfo_path=mediainfo_path,
 		aac_encoder="aac",
 		quality_args=["-b:a", "160k"],
 		audnex_url="https://api.audnex.us",

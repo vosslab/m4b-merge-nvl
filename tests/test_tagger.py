@@ -186,34 +186,6 @@ def test_tagger_skip_none_values(tiny_m4b):
 		assert len(mp4_file["\xa9ART"]) == 0 or mp4_file["\xa9ART"][0] == ""
 
 
-def test_tagger_with_genres(tiny_m4b, tiny_jpeg):
-	"""Test genre tagging."""
-	metadata = {
-		"title": "Genre Test",
-		"subtitle": None,
-		"authors": ["Author"],
-		"narrators": ["Narrator"],
-		"length": None,
-		"release_date": None,
-		"publisher": None,
-		"language": None,
-		"description": None,
-		"cover_url": None,
-		"genres": ["Fiction", "Science Fiction"],
-		"chapters": [],
-	}
-
-	# Write tags
-	tagger.write(tiny_m4b, metadata, tiny_jpeg)
-
-	# Read back
-	mp4_file = mutagen.mp4.MP4(str(tiny_m4b))
-
-	# Check genre (should be first one)
-	assert "\xa9gen" in mp4_file
-	assert mp4_file["\xa9gen"][0] == "Fiction"
-
-
 def test_tagger_no_cover(tiny_m4b):
 	"""Test writing metadata without cover."""
 	metadata = {
