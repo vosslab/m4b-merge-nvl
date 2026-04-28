@@ -36,57 +36,51 @@ def parse_args():
 		"-o", "--output",
 		dest="output_path",
 		type=Path,
-		required=True,
-		help="Output directory (creates <dir>/<title>.m4b) or path to .m4b file"
+		default=Path.cwd(),
+		help="Output directory or .m4b path (default: current working directory)"
 	)
 
-	parser.add_argument(
+	# ASIN options. -a supplies the ASIN directly (no prompt), while -n
+	# disables Audnex entirely. The two are mutually exclusive.
+	asin_group = parser.add_mutually_exclusive_group()
+	asin_group.add_argument(
+		"-a", "--asin",
+		dest="asin",
+		type=str,
+		default=None,
+		help="Audible ASIN (skips interactive prompt)"
+	)
+	asin_group.add_argument(
 		"-n", "--no-asin",
 		dest="no_asin",
 		action="store_true",
 		help="Skip Audnex metadata lookup; use sidecar and cover only"
 	)
 
-	dry_run_group = parser.add_mutually_exclusive_group()
-	dry_run_group.add_argument(
+	parser.add_argument(
+		"-b", "--bitrate",
+		dest="bitrate_kbps",
+		type=int,
+		default=None,
+		help="Target output bitrate in kbps (32-320). Default: scale from input."
+	)
+
+	parser.add_argument(
 		"-d", "--dry-run",
 		dest="dry_run", action="store_true",
 		help="Plan execution without writing files"
 	)
-	dry_run_group.add_argument(
-		"--no-dry-run",
-		dest="dry_run", action="store_false",
-		help="Disable dry-run (default)"
-	)
-	parser.set_defaults(dry_run=False)
 
-	keep_temp_group = parser.add_mutually_exclusive_group()
-	keep_temp_group.add_argument(
-		"-k", "--keep-temp",
-		dest="keep_temp", action="store_true",
-		help="Preserve temporary directory after merge completes"
-	)
-	keep_temp_group.add_argument(
-		"--no-keep-temp",
-		dest="keep_temp", action="store_false",
-		help="Remove temporary directory after merge completes (default)"
-	)
-	parser.set_defaults(keep_temp=False)
+	args = parser.parse_args()
 
-	force_group = parser.add_mutually_exclusive_group()
-	force_group.add_argument(
-		"-f", "--force",
-		dest="force", action="store_true",
-		help="Overwrite existing output file if it exists"
-	)
-	force_group.add_argument(
-		"--no-force",
-		dest="force", action="store_false",
-		help="Refuse to overwrite existing output (default)"
-	)
-	parser.set_defaults(force=False)
+	# Validate bitrate range up front so a bad value fails fast at the CLI
+	# layer rather than partway into the encoding step.
+	if args.bitrate_kbps is not None and not (32 <= args.bitrate_kbps <= 320):
+		parser.error(
+			f"--bitrate must be between 32 and 320 kbps, got {args.bitrate_kbps}"
+		)
 
-	return parser.parse_args()
+	return args
 
 
 def _validate_output_path(output_path: Path) -> None:
@@ -161,13 +155,18 @@ def main():
 	# Build RuntimeConfig
 	config = runtime_config.discover(
 		audnex_url=AUDNEX_URL,
-		keep_temp=args.keep_temp,
 		dry_run=args.dry_run,
+		target_bitrate_kbps=args.bitrate_kbps,
 	)
 
-	# Prompt for ASIN if not --no-asin
+	# Resolve ASIN: explicit --asin > interactive prompt > skip (--no-asin).
 	asin = None
-	if not args.no_asin:
+	if args.asin:
+		# User-supplied ASIN must still pass Audnex validation so we fail
+		# fast on typos rather than partway into the merge.
+		helpers.validate_asin(AUDNEX_URL, args.asin)
+		asin = args.asin
+	elif not args.no_asin:
 		asin = _prompt_for_asin(AUDNEX_URL)
 
 	# Create and run Merger
@@ -177,7 +176,6 @@ def main():
 		runtime_config=config,
 		no_asin=args.no_asin,
 		asin=asin,
-		force=args.force,
 	)
 
 	m.run()

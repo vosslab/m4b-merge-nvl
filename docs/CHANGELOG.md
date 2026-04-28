@@ -7,8 +7,32 @@ by `standard-version` against the upstream `djdembeck/m4b-merge` repo.
 
 ## 2026-04-27
 
+### Additions and New Features
+
+- `__main__.py`: new `-a/--asin` flag accepts an ASIN directly and skips the
+  interactive prompt. Mutually exclusive with `-n/--no-asin`. ASIN is
+  validated against Audnex up front so typos fail fast.
+- `__main__.py`: new `-b/--bitrate` flag overrides the output AAC bitrate
+  (kbps, range 32-320). When omitted, output bitrate auto-scales to the
+  maximum input source bitrate (rounded to 16 kbps, clamped to [32, 320]).
+- `ffmpeg_runner.probe`: now returns `bitrate_bps` (overall bitrate from
+  mediainfo's General track, falling back to the Audio track).
+- `runtime_config.RuntimeConfig`: new `target_bitrate_kbps` field (None =
+  auto-scale). `discover()` accepts `target_bitrate_kbps`.
+- `merger._select_quality_args`: new helper picks encoder quality args from
+  user override or source probes; `encode_to_m4a` accepts a per-call
+  `quality_args` override.
+
 ### Behavior or Interface Changes
 
+- `__main__.py`: `-o/--output` is now optional and defaults to the current
+  working directory (output is a single `.m4b` file, not a folder of files).
+- `__main__.py`: removed redundant paired `--no-dry-run`, `--no-keep-temp`,
+  `--no-force` flags. Defaults are False, so the off-flags carried no
+  configuration value (PYTHON_STYLE.md argparse minimalism).
+- `merger._sanitize_title`: collapses whitespace runs to single underscores
+  so generated filenames (e.g. `Conquering_the_Electron.m4b`) don't require
+  shell escaping. Tests updated accordingly.
 - `__main__.py`: removed `-u/--api-url` flag (argparse minimalism). Audnex
   base URL is now a module-level `AUDNEX_URL` constant. Boolean flags
   `--dry-run`, `--keep-temp`, `--force` now have paired `--no-*` variants

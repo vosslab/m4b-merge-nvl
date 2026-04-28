@@ -48,7 +48,9 @@ def _sanitize_title(title: str) -> str:
 	if not title:
 		return "audiobook"
 
-	# Replace problematic characters with hyphen
+	# Replace problematic characters with hyphen, then collapse whitespace
+	# runs into single underscores so the resulting filename is shell-safe
+	# and free of spaces.
 	problematic_chars = set(":/\\?*\"<>|")
 	result = ""
 	for char in title:
@@ -61,10 +63,50 @@ def _sanitize_title(title: str) -> str:
 	while "--" in result:
 		result = result.replace("--", "-")
 
-	# Strip leading/trailing hyphens
-	result = result.strip("-")
+	# Convert any whitespace runs to single underscores
+	result = "_".join(result.split())
+
+	# Strip leading/trailing hyphens or underscores
+	result = result.strip("-_")
 
 	return result if result else "audiobook"
+
+
+def _select_quality_args(runtime_config, probe_results: list[dict]) -> list[str] | None:
+	"""
+	Pick AAC encoder quality args based on RuntimeConfig and source probes.
+
+	Priority:
+	1. If runtime_config.target_bitrate_kbps is set (user-supplied), use it
+	   directly: ["-b:a", "<N>k"].
+	2. Otherwise auto-scale: take the maximum bitrate across source files,
+	   round to the nearest 16 kbps, clamp to [32, 320] kbps.
+	3. If no probe reports a bitrate, return None so the caller falls back
+	   to runtime_config.quality_args (the static default).
+
+	Args:
+		runtime_config: RuntimeConfig.
+		probe_results: List of probe dicts (from ffmpeg_runner.probe).
+
+	Returns:
+		List of ffmpeg quality flags, or None to use the default.
+	"""
+	if runtime_config.target_bitrate_kbps is not None:
+		return ["-b:a", f"{runtime_config.target_bitrate_kbps}k"]
+
+	bitrates_kbps = []
+	for probe in probe_results:
+		bps = probe.get("bitrate_bps")
+		if bps:
+			bitrates_kbps.append(bps / 1000.0)
+
+	if not bitrates_kbps:
+		return None
+
+	# Round max bitrate to nearest 16 kbps step, clamp to [32, 320]
+	target_kbps = round(max(bitrates_kbps) / 16) * 16
+	target_kbps = max(32, min(320, target_kbps))
+	return ["-b:a", f"{target_kbps}k"]
 
 
 class Merger:
@@ -77,7 +119,6 @@ class Merger:
 		runtime_config,
 		no_asin: bool,
 		asin: str | None = None,
-		force: bool = False,
 	):
 		"""
 		Initialize Merger.
@@ -88,14 +129,12 @@ class Merger:
 			runtime_config: RuntimeConfig with binaries and options.
 			no_asin: If True, skip Audnex lookup.
 			asin: Audible ASIN, or None to skip.
-			force: If True, overwrite existing output file.
 		"""
 		self.input_path = pathlib.Path(input_path)
 		self.output_path = pathlib.Path(output_path)
 		self.runtime_config = runtime_config
 		self.no_asin = no_asin
 		self.asin = asin
-		self.force = force
 
 	def run(self) -> None:
 		"""
@@ -198,11 +237,19 @@ class Merger:
 						str(src_file), self.runtime_config
 					)
 
+		# Choose target encoder quality args (auto-scaled from sources or
+		# user-supplied via --bitrate). None means "use runtime defaults".
+		selected_quality_args = _select_quality_args(
+			self.runtime_config, probe_results_src
+		)
+
 		# Step 5: Dry-run branch
 		if self.runtime_config.dry_run:
 			self._print_dry_run_report(
 				source_files, metadata, cover_path, cover_hit,
-				files_needing_silence_detection
+				files_needing_silence_detection,
+				selected_quality_args=selected_quality_args,
+				probe_results=probe_results_src,
 			)
 			return
 
@@ -210,7 +257,12 @@ class Merger:
 		self.runtime_config.tmp_dir.mkdir(parents=True, exist_ok=True)
 
 		# Step 6: Encode each MP3 to M4A
-		print(f"[5/8] Encoding {len(source_files)} file(s) to AAC ({self.runtime_config.aac_encoder} {' '.join(self.runtime_config.quality_args)})...")
+		effective_quality_args = (
+			selected_quality_args
+			if selected_quality_args is not None
+			else self.runtime_config.quality_args
+		)
+		print(f"[5/8] Encoding {len(source_files)} file(s) to AAC ({self.runtime_config.aac_encoder} {' '.join(effective_quality_args)})...")
 		encoded_dir = self.runtime_config.tmp_dir / "encoded"
 		encoded_dir.mkdir(parents=True, exist_ok=True)
 
@@ -221,7 +273,10 @@ class Merger:
 			dst_file = encoded_dir / f"{idx:03d}.m4a"
 			src_dur = probe_results_src[idx]["duration_seconds"]
 			print(f"      [{idx+1:>2}/{len(source_files)}] {src_file.name} ({src_dur:.1f}s)", end="", flush=True)
-			ffmpeg_runner.encode_to_m4a(src_file, dst_file, self.runtime_config)
+			ffmpeg_runner.encode_to_m4a(
+				src_file, dst_file, self.runtime_config,
+				quality_args=selected_quality_args,
+			)
 			encoded_files.append(dst_file)
 			elapsed = time.monotonic() - step_start
 			print(f" -> {elapsed:.1f}s ({src_dur/elapsed:.0f}x realtime)")
@@ -288,8 +343,7 @@ class Merger:
 		tagger.write(final_m4b, metadata, cover_path)
 
 		# Step 11: Cleanup
-		if not self.runtime_config.keep_temp:
-			shutil.rmtree(self.runtime_config.tmp_dir, ignore_errors=True)
+		shutil.rmtree(self.runtime_config.tmp_dir, ignore_errors=True)
 
 		size_mb = final_m4b.stat().st_size / (1024 * 1024)
 		total_elapsed = time.monotonic() - run_start
@@ -497,11 +551,17 @@ class Merger:
 				f"Output path must be a directory or end in .m4b: {self.output_path}"
 			)
 
-		# Check for output file collision (MED-10)
-		if check_collision and resolved.exists() and not self.force:
-			raise FileExistsError(
-				f"Output file already exists: {resolved}. Use --force to overwrite."
-			)
+		# Check for output file collision. Prompt the user interactively so
+		# accidental clobbers don't happen silently, but a y/Y reply is
+		# enough to overwrite without re-running with a flag.
+		if check_collision and resolved.exists():
+			reply = input(
+				f"Output file already exists: {resolved}\nOverwrite? [y/N]: "
+			).strip().lower()
+			if reply not in ("y", "yes"):
+				raise FileExistsError(
+					f"Refusing to overwrite existing output: {resolved}"
+				)
 
 		return resolved
 
@@ -512,6 +572,8 @@ class Merger:
 		cover_path: pathlib.Path | None,
 		cover_hit,
 		files_needing_silence_detection: list[int] | None = None,
+		selected_quality_args: list[str] | None = None,
+		probe_results: list[dict] | None = None,
 	) -> None:
 		"""
 		Print a dry-run report to stdout.
@@ -530,19 +592,31 @@ class Merger:
 		print("M4B-MERGE DRY-RUN REPORT")
 		print("=" * 70)
 		print()
+		# Display the args that would actually be used: caller-supplied
+		# selection (auto or --bitrate) wins; otherwise the runtime default.
+		effective_args = (
+			selected_quality_args
+			if selected_quality_args is not None
+			else self.runtime_config.quality_args
+		)
 		print(f"Output Path:     {output_path}")
 		print(f"Encoder:         {self.runtime_config.aac_encoder}")
-		print(f"Quality Args:    {self.runtime_config.quality_args}")
+		print(f"Quality Args:    {effective_args}")
 		print()
 
 		print("Source Files (in processing order):")
-		probes = [ffmpeg_runner.probe(src_file, self.runtime_config) for src_file in source_files]
+		# Prefer the probes the caller already ran to avoid a second pass.
+		probes = probe_results if probe_results is not None else [
+			ffmpeg_runner.probe(src_file, self.runtime_config) for src_file in source_files
+		]
 		for idx, (src_file, probe) in enumerate(zip(source_files, probes), 1):
 			duration = probe["duration_seconds"]
+			bps = probe.get("bitrate_bps")
+			bitrate_note = f" @ {bps // 1000} kbps" if bps else ""
 			note = ""
 			if files_needing_silence_detection and (idx - 1) in files_needing_silence_detection:
 				note = " [silence detection will be run]"
-			print(f"  {idx:2d}. {src_file.name:<40} {duration:8.2f}s{note}")
+			print(f"  {idx:2d}. {src_file.name:<40} {duration:8.2f}s{bitrate_note}{note}")
 		print()
 
 		total_duration = sum(p["duration_seconds"] for p in probes)

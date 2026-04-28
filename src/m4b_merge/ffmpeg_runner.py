@@ -35,7 +35,8 @@ def probe(path: pathlib.Path, runtime_config) -> dict:
 
 	Returns:
 		Dict with normalized keys: codec, sample_rate, channels,
-		channel_layout, duration_seconds, time_base.
+		channel_layout, duration_seconds, time_base, bitrate_bps.
+		bitrate_bps is None if mediainfo did not report a bitrate.
 
 	Raises:
 		subprocess.CalledProcessError: if mediainfo fails.
@@ -88,6 +89,15 @@ def probe(path: pathlib.Path, runtime_config) -> dict:
 	if not channel_layout:
 		channel_layout = _layout_from_channels(channels)
 
+	# Extract overall bitrate. Prefer General track OverallBitRate (covers
+	# the whole container). Fall back to the Audio track BitRate. None when
+	# mediainfo cannot report a value (very rare for MP3/M4A).
+	bitrate_bps = None
+	if general_track and "OverallBitRate" in general_track:
+		bitrate_bps = int(general_track["OverallBitRate"])
+	elif "BitRate" in audio_track:
+		bitrate_bps = int(audio_track["BitRate"])
+
 	# Extract duration (prefer General track, fallback to Audio track)
 	duration_seconds = None
 	if general_track and "Duration" in general_track:
@@ -104,6 +114,7 @@ def probe(path: pathlib.Path, runtime_config) -> dict:
 		"channel_layout": channel_layout,
 		"duration_seconds": duration_seconds,
 		"time_base": "1/1000",
+		"bitrate_bps": bitrate_bps,
 	}
 
 
@@ -125,22 +136,34 @@ def _layout_from_channels(channels: int) -> str:
 		return f"unknown_{channels}ch"
 
 
-def encode_to_m4a(src: pathlib.Path, dst: pathlib.Path, runtime_config) -> None:
+def encode_to_m4a(
+	src: pathlib.Path,
+	dst: pathlib.Path,
+	runtime_config,
+	quality_args: list[str] | None = None,
+) -> None:
 	"""
 	Encode audio to AAC M4A format.
 
-	Preserves source sample rate and channel layout. Uses the encoder and
-	quality settings selected in runtime_config.
+	Preserves source sample rate and channel layout. Uses the encoder from
+	runtime_config; quality args come from the caller-supplied override when
+	provided, otherwise from runtime_config.quality_args.
 
 	Args:
 		src: Source audio file.
 		dst: Destination M4A file.
 		runtime_config: RuntimeConfig with ffmpeg_path, aac_encoder,
 			quality_args.
+		quality_args: Optional override for the encoder quality flags
+			(e.g. ["-b:a", "96k"]). When None, falls back to
+			runtime_config.quality_args.
 
 	Raises:
 		subprocess.CalledProcessError: if ffmpeg encoding fails.
 	"""
+	# Resolve which quality args to apply. The caller can scale the bitrate
+	# to the input source without mutating the frozen RuntimeConfig.
+	effective_args = quality_args if quality_args is not None else runtime_config.quality_args
 	subprocess.run(
 		[
 			runtime_config.ffmpeg_path,
@@ -148,7 +171,7 @@ def encode_to_m4a(src: pathlib.Path, dst: pathlib.Path, runtime_config) -> None:
 			"-i", str(src),
 			"-vn",
 			"-c:a", runtime_config.aac_encoder,
-			*runtime_config.quality_args,
+			*effective_args,
 			str(dst),
 		],
 		capture_output=True,

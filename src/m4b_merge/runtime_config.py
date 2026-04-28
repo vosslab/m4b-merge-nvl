@@ -27,18 +27,22 @@ class RuntimeConfig:
 	aac_encoder: str
 	quality_args: list[str]
 	audnex_url: str
-	keep_temp: bool
 	dry_run: bool
 	tmp_dir: Path
+	# Target output bitrate in kbps. None means auto-scale from input source(s).
+	target_bitrate_kbps: int | None = None
 
 
-def discover(audnex_url: str, keep_temp: bool, dry_run: bool) -> RuntimeConfig:
+def discover(
+	audnex_url: str,
+	dry_run: bool,
+	target_bitrate_kbps: int | None = None,
+) -> RuntimeConfig:
 	"""
 	Discover external binaries and build RuntimeConfig.
 
 	Args:
 		audnex_url: Audnex API base URL.
-		keep_temp: If True, preserve temp directory after pipeline runs.
 		dry_run: If True, plan execution without writing files.
 
 	Returns:
@@ -81,9 +85,9 @@ def discover(audnex_url: str, keep_temp: bool, dry_run: bool) -> RuntimeConfig:
 		aac_encoder=aac_encoder,
 		quality_args=quality_args,
 		audnex_url=audnex_url,
-		keep_temp=keep_temp,
 		dry_run=dry_run,
 		tmp_dir=tmp_dir,
+		target_bitrate_kbps=target_bitrate_kbps,
 	)
 
 

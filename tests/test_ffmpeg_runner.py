@@ -9,33 +9,14 @@ import shutil
 import subprocess
 import pytest
 import m4b_merge.ffmpeg_runner as ffmpeg_runner
-from m4b_merge.runtime_config import RuntimeConfig
+
+import conftest
 
 
 @pytest.fixture
 def runtime_config_fixture(tmp_path):
-	"""
-	Create a minimal RuntimeConfig for testing.
-
-	Skips tests if ffmpeg or mediainfo is not available.
-	"""
-	ffmpeg_path = shutil.which("ffmpeg")
-	mediainfo_path = shutil.which("mediainfo")
-	sox_path = shutil.which("sox")
-	if not ffmpeg_path or not mediainfo_path or not sox_path:
-		pytest.skip("ffmpeg, mediainfo, or sox not installed")
-
-	return RuntimeConfig(
-		ffmpeg_path=ffmpeg_path,
-		mediainfo_path=mediainfo_path,
-		sox_path=sox_path,
-		aac_encoder="aac",
-		quality_args=["-b:a", "160k"],
-		audnex_url="https://example.com",
-		keep_temp=False,
-		dry_run=False,
-		tmp_dir=tmp_path,
-	)
+	"""Minimal RuntimeConfig for testing."""
+	return conftest.make_runtime_config(tmp_path)
 
 
 def _generate_test_audio(path: pathlib.Path, duration_sec: float, sample_rate: int = 44100) -> None:
